@@ -1,17 +1,185 @@
-# Agent Coordinator
+# Agent CLI
 
-Multi-terminal AI agent coordination system that enables multiple Claude Code instances to work in parallel on the same codebase.
+A natural language CLI for orchestrating AI coding agents across your projects. Run Claude-powered agents from a single terminal with intuitive commands.
 
 ## Features
 
-- **Parallel Agents** - Run multiple Claude Code agents in separate terminals
-- **Task Queue** - Priority-based task queue with automatic assignment
-- **File Locking** - Prevents concurrent edits to the same files
-- **Git Integration** - Automatic branch creation for isolation
-- **Message Bus** - File-based communication (no server process required)
-- **Status Dashboard** - Real-time status monitoring
+- **Natural Language Commands** - Just type what you want: "go to projects", "use frontend agent"
+- **Multiple Agent Types** - Fullstack, Frontend, Backend, Tester, Refactor, Docs specialists
+- **Smart Navigation** - Navigate directories with plain English
+- **AI Interpretation** - Ambiguous commands are interpreted by Claude
+- **Single Terminal** - No server setup, everything runs from one place
+- **Multi-Agent Mode** - Optional parallel agents for complex projects
 
-## Architecture
+## Installation
+
+```bash
+# Clone and install
+git clone https://github.com/sid1943/agent-cli.git
+cd agent-cli
+npm install
+npm run build
+npm link
+```
+
+Or install directly:
+```bash
+npm install -g github:sid1943/agent-cli
+```
+
+## Quick Start
+
+```bash
+agent -i
+```
+
+That's it! You're now in interactive mode.
+
+## Usage
+
+### Interactive Mode (Recommended)
+
+```bash
+agent -i
+```
+
+This opens an interactive prompt where you can:
+
+```
+[fullstack] Projects > go to smart-task-hub
+📁 Changed to: C:\Users\...\smart-task-hub
+   42 files, 8 folders, git repo, node project
+
+[fullstack] smart-task-hub > use frontend agent
+🤖 Switched to: Frontend Specialist
+   React, CSS, UI components
+
+[frontend] smart-task-hub > fix the button alignment in Header.tsx
+════════════════════════════════════════════════════════════
+🤖 Agent: Frontend Specialist
+📁 Working in: C:\Users\...\smart-task-hub
+📋 Task: fix the button alignment in Header.tsx
+════════════════════════════════════════════════════════════
+... Claude executes the task ...
+```
+
+### Quick Task Mode
+
+```bash
+agent "fix the login bug"
+agent "add dark mode" -t frontend
+agent "write unit tests" -t tester -f src/auth.ts
+```
+
+### Command Line Options
+
+| Option | Description |
+|--------|-------------|
+| `-i, --interactive` | Start interactive mode |
+| `-t, --type <type>` | Agent type: fullstack, frontend, backend, tester, refactor, docs |
+| `-f, --files <list>` | Target files (comma-separated) |
+| `-d, --dirs <list>` | Target directories (comma-separated) |
+| `-m, --model <model>` | Claude model (default: claude-sonnet-4-20250514) |
+| `-w, --workdir <path>` | Working directory |
+
+## Natural Language Commands
+
+### Navigation
+
+| Say This | Does This |
+|----------|-----------|
+| `go to projects` | Navigate to Projects folder |
+| `open smart-task-hub` | Open that project |
+| `cd src/components` | Change to directory |
+| `back` or `..` | Go up one directory |
+| `home` | Go to home directory |
+| `desktop` | Go to Desktop |
+| `list` or `ls` | List files |
+
+### Agent Selection
+
+| Say This | Does This |
+|----------|-----------|
+| `use frontend agent` | Switch to Frontend Specialist |
+| `be a tester` | Switch to QA/Test Engineer |
+| `switch to backend` | Switch to Backend Engineer |
+| `fullstack mode` | Switch to Full-Stack Developer |
+
+### Status & Help
+
+| Say This | Does This |
+|----------|-----------|
+| `status` | Show current status |
+| `where am i` | Show current directory & agent |
+| `help` | Show all commands |
+| `quit` or `exit` | Exit the CLI |
+
+## Agent Types
+
+| Agent | Focus | Best For |
+|-------|-------|----------|
+| **fullstack** | Frontend, backend, database | General development |
+| **frontend** | React, CSS, UI components | UI/UX work |
+| **backend** | APIs, databases, server logic | Server-side code |
+| **tester** | Tests, bugs, quality | Writing tests, QA |
+| **refactor** | Code quality, performance | Cleanup, optimization |
+| **docs** | Documentation, comments | README, API docs |
+
+## Slash Commands
+
+In interactive mode, you can also use slash commands:
+
+```
+/cd <path>       - Change directory
+/ls              - List files
+/pwd             - Print current directory
+/projects        - Jump to Projects folder
+/type            - Change agent type (shows menu)
+/files <list>    - Set target files
+/dirs <list>     - Set target directories
+/clear           - Clear file/dir targets
+/status          - Show full status
+/help            - Show all commands
+/quit            - Exit
+```
+
+## Examples
+
+### Frontend Development
+```bash
+agent -i
+> go to my-react-app
+> use frontend agent
+> add a responsive navbar component
+> fix the CSS grid layout in Dashboard.tsx
+```
+
+### Backend API Work
+```bash
+agent -i
+> open backend-service
+> switch to backend
+> add authentication middleware
+> create a new /users endpoint
+```
+
+### Testing
+```bash
+agent "write tests for the auth module" -t tester -d src/auth/
+```
+
+### Quick Fixes
+```bash
+agent "fix the TypeScript errors in utils.ts" -f src/utils.ts
+```
+
+---
+
+## Multi-Agent Mode (Advanced)
+
+For complex projects requiring parallel agents working simultaneously:
+
+### Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -21,14 +189,7 @@ Multi-terminal AI agent coordination system that enables multiple Claude Code in
 │  ├── state.json          # Shared state file                     │
 │  ├── tasks/              # Task definitions                      │
 │  ├── locks/              # File lock registry                    │
-│  ├── agents/             # Per-agent inbox/outbox                │
-│  │   ├── swift-falcon-42/                                       │
-│  │   │   ├── inbox/      # Messages TO this agent               │
-│  │   │   └── outbox/     # Messages FROM this agent             │
-│  │   └── keen-wolf-87/                                          │
-│  │       ├── inbox/                                              │
-│  │       └── outbox/                                             │
-│  └── messages/           # Global message board                  │
+│  └── agents/             # Per-agent inbox/outbox                │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
 
@@ -42,177 +203,25 @@ Terminal 1 (Server):     Terminal 2 (Agent):     Terminal 3 (Agent):
 └──────────────────┘     └──────────────────┘    └──────────────────┘
 ```
 
-## Installation
+### Multi-Agent Commands
 
 ```bash
-cd agents
-npm install
-npm run build
-npm link  # Makes commands available globally
-```
-
-## Quick Start
-
-### 1. Start the Coordinator (Terminal 1)
-
-```bash
-cd your-project
+# Terminal 1: Start the server
 agent-server
-```
 
-### 2. Add Tasks
+# Terminal 2-N: Start agents
+agent-client -n agent1 -t frontend
+agent-client -n agent2 -t backend
 
-```bash
-# Add tasks to the queue
-agent-task add "Fix login bug" --priority high --files src/auth.ts
-agent-task add "Add unit tests for user service" --files tests/user.test.ts
-agent-task add "Refactor database module" --priority normal --dirs src/db/
-```
+# Add tasks to queue
+agent-task add "implement login UI" --priority high --files src/Login.tsx
+agent-task add "create auth API" --files src/api/auth.ts
 
-### 3. Start Agents (Terminal 2, 3, etc.)
-
-```bash
-# Terminal 2
-agent-client --name alpha
-
-# Terminal 3
-agent-client --name beta
-```
-
-### 4. Monitor Status
-
-```bash
-# In another terminal
+# Monitor status
 agent-status
 ```
 
-## CLI Commands
-
-### agent-server
-
-Starts the coordination server that watches for agents and assigns tasks.
-
-```bash
-agent-server [project-path]
-```
-
-### agent-client
-
-Starts an agent that connects to the coordinator and executes tasks.
-
-```bash
-agent-client [options]
-
-Options:
-  -n, --name <name>    Agent name (default: auto-generated)
-  -d, --dir <path>     Working directory
-  --no-auto            Don't auto-accept tasks
-  -m, --model <model>  Claude model (default: claude-sonnet-4-20250514)
-```
-
-### agent-task
-
-Manage tasks in the queue.
-
-```bash
-agent-task add <title> [options]
-agent-task list
-agent-task show <id>
-agent-task interactive
-
-Options for 'add':
-  --desc <text>         Description
-  --priority <p>        critical, high, normal, low
-  --files <f1,f2>       Target files
-  --dirs <d1,d2>        Target directories
-  --depends <id1,id2>   Dependencies
-```
-
-### agent-status
-
-Show current status of agents and tasks.
-
-```bash
-agent-status [project-path]
-```
-
-## Programmatic Usage
-
-```typescript
-import { createCoordinator, createAgent, TaskServer, AgentClient } from '@anthropic/agent-coordinator';
-
-// Server side
-const server = await createCoordinator('/path/to/project');
-server.startWatching();
-
-// Create tasks
-await server.createTask({
-  title: 'Fix login bug',
-  description: 'Users cannot log in with email',
-  priority: 'high',
-  files: ['src/auth.ts'],
-});
-
-// Client side (each agent in separate process)
-const agent = await createAgent({ name: 'worker-1' });
-
-await agent.start(async (task) => {
-  // Execute task with Claude Code or custom logic
-  console.log(`Working on: ${task.title}`);
-
-  // Return result
-  return {
-    success: true,
-    summary: 'Fixed the login bug',
-    filesModified: ['src/auth.ts'],
-    filesCreated: [],
-    filesDeleted: [],
-  };
-});
-```
-
-## File Locking
-
-The system prevents multiple agents from editing the same files:
-
-```typescript
-// Agent automatically acquires locks for task.targetFiles
-// Or manually request locks:
-const result = await agent.requestLocks(['src/auth.ts', 'src/user.ts']);
-
-if (result.success) {
-  // Safe to edit files
-  // ...
-  await agent.releaseLocks(['src/auth.ts', 'src/user.ts']);
-}
-```
-
-## Configuration
-
-Create `.agent-coordinator/config.json` in your project:
-
-```json
-{
-  "maxAgents": 10,
-  "heartbeatInterval": 5000,
-  "heartbeatTimeout": 30000,
-  "lockTimeout": 300000,
-  "taskTimeout": 3600000,
-  "autoAssign": true,
-  "gitIntegration": true,
-  "branchPrefix": "agent/"
-}
-```
-
-Or use environment variables:
-
-```bash
-export AGENT_MAX_AGENTS=5
-export AGENT_AUTO_ASSIGN=true
-export AGENT_GIT_INTEGRATION=false
-```
-
-## Task Priority
+### Task Priority
 
 Tasks are processed in priority order:
 
@@ -221,26 +230,41 @@ Tasks are processed in priority order:
 3. `normal` - Standard priority (default)
 4. `low` - Background tasks
 
-## Events
+### File Locking
 
-Subscribe to coordination events:
+The system prevents multiple agents from editing the same files simultaneously.
 
-```typescript
-server.onEvent((event) => {
-  switch (event.type) {
-    case 'agent:registered':
-      console.log(`New agent: ${event.data.agent.id}`);
-      break;
-    case 'task:completed':
-      console.log(`Task done: ${event.data.task.title}`);
-      break;
-    case 'lock:conflict':
-      console.log(`Lock conflict: ${event.data.path}`);
-      break;
-  }
-});
+---
+
+## Project Structure
+
 ```
+agent-cli/
+├── src/
+│   ├── cli/
+│   │   └── run.ts          # Main CLI with natural language processing
+│   ├── client/
+│   │   └── AgentClient.ts  # Agent client (for multi-agent mode)
+│   ├── server/
+│   │   └── TaskServer.ts   # Task server (for multi-agent mode)
+│   └── shared/
+│       ├── types.ts        # Type definitions
+│       ├── config.ts       # Configuration
+│       └── utils.ts        # Utilities
+├── bin/
+│   └── agent.js            # CLI entry point
+└── package.json
+```
+
+## Requirements
+
+- Node.js 18+
+- Claude Code CLI (`npx claude`)
 
 ## License
 
 MIT
+
+## Contributing
+
+Contributions welcome! Please open an issue or PR on [GitHub](https://github.com/sid1943/agent-cli).
