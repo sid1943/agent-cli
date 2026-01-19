@@ -158,6 +158,73 @@ function showStatus(state: AgentState): void {
   console.log('╚════════════════════════════════════════════════════════════╝\n');
 }
 
+// Interpret ambiguous command using Claude
+async function interpretCommand(
+  input: string,
+  state: AgentState
+): Promise<{ action: 'task' | 'navigate' | 'agent' | 'unknown'; target?: string }> {
+  return new Promise((resolve) => {
+    const interpretPrompt = `You are a command interpreter for a developer CLI tool. Analyze this input and determine the user's intent.
+
+Current directory: ${state.currentDir}
+Current agent: ${state.agentType.name}
+
+User input: "${input}"
+
+Respond with ONLY a JSON object (no markdown, no explanation):
+{"action": "task" | "navigate" | "agent" | "unknown", "target": "optional target path or agent name"}
+
+Examples:
+- "fix the login bug" → {"action": "task"}
+- "open the src folder" → {"action": "navigate", "target": "src"}
+- "work on the API" → {"action": "task"}
+- "be a frontend developer" → {"action": "agent", "target": "frontend"}
+- "go to smart-task-hub" → {"action": "navigate", "target": "smart-task-hub"}
+
+JSON response:`;
+
+    const claudeProcess = spawn('npx', [
+      'claude',
+      '--print',
+      '--model', 'claude-haiku-3-5-sonnet-20240620',
+      '-p', interpretPrompt
+    ], {
+      cwd: state.currentDir,
+      shell: true,
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+
+    let output = '';
+    claudeProcess.stdout?.on('data', (data) => {
+      output += data.toString();
+    });
+
+    claudeProcess.on('close', () => {
+      try {
+        // Try to extract JSON from output
+        const jsonMatch = output.match(/\{[^}]+\}/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          resolve(parsed);
+        } else {
+          resolve({ action: 'task' });
+        }
+      } catch {
+        resolve({ action: 'task' });
+      }
+    });
+
+    claudeProcess.on('error', () => {
+      resolve({ action: 'task' });
+    });
+
+    // Timeout after 5 seconds
+    setTimeout(() => {
+      resolve({ action: 'task' });
+    }, 5000);
+  });
+}
+
 // Execute task with Claude
 async function executeWithClaude(
   taskDescription: string,
@@ -247,6 +314,153 @@ async function interactiveMode(initialDir: string, model: string) {
   console.log('  /quit, /q      - Exit');
   console.log('\nOr just type a task to execute it!\n');
 
+  // Natural language command detection
+  type CommandType = 'nav' | 'status' | 'list' | 'help' | 'quit' | 'agent' | 'task';
+
+  const parseNaturalCommand = (input: string): { type: CommandType; target?: string } | null => {
+    const lower = input.toLowerCase();
+
+    // Navigation patterns
+    if (lower.match(/^(go to|cd|navigate to|open|switch to|move to)\s+(.+)/i)) {
+      const match = input.match(/^(?:go to|cd|navigate to|open|switch to|move to)\s+(.+)/i);
+      // Check if it's agent switching, not navigation
+      const target = match?.[1]?.toLowerCase() || '';
+      if (target.includes('agent') || AGENT_TYPES.some(a => target.includes(a.id) || target.includes(a.name.toLowerCase()))) {
+        return { type: 'agent', target: match?.[1] };
+      }
+      return { type: 'nav', target: match?.[1] };
+    }
+
+    // Agent selection patterns
+    const agentPatterns = [
+      /^(use|switch to|change to|be a|act as|become)\s+(a\s+)?(.+?)\s*(agent)?$/i,
+      /^(frontend|backend|fullstack|tester|refactor|docs)\s*(agent|mode)?$/i,
+      /^agent\s+(.+)$/i,
+    ];
+
+    for (const pattern of agentPatterns) {
+      const match = lower.match(pattern);
+      if (match) {
+        const agentName = match[3] || match[1] || match[0];
+        return { type: 'agent', target: agentName };
+      }
+    }
+
+    // Common locations
+    if (lower.includes('projects') && (lower.includes('desktop') || lower.includes('go') || lower.includes('open'))) {
+      return { type: 'nav', target: 'projects' };
+    }
+    if (lower === 'home' || lower === 'go home') {
+      return { type: 'nav', target: '~' };
+    }
+    if (lower === 'back' || lower === 'go back' || lower === '..' || lower === 'up') {
+      return { type: 'nav', target: '..' };
+    }
+    if (lower === 'desktop') {
+      return { type: 'nav', target: 'desktop' };
+    }
+
+    // Status
+    if (lower === 'status' || lower === 'show status' || lower === 'where am i' || lower === 'info' || lower === 'pwd') {
+      return { type: 'status' };
+    }
+
+    // List
+    if (lower === 'ls' || lower === 'dir' || lower === 'list' || lower === 'show files' || lower === 'what files' || lower === 'files') {
+      return { type: 'list' };
+    }
+
+    // Help
+    if (lower === 'help' || lower === 'commands' || lower === 'what can you do' || lower === '?') {
+      return { type: 'help' };
+    }
+
+    // Quit
+    if (lower === 'quit' || lower === 'exit' || lower === 'bye' || lower === 'goodbye' || lower === 'q') {
+      return { type: 'quit' };
+    }
+
+    return null;
+  };
+
+  // Find agent by natural language name
+  const findAgent = (query: string): AgentType | null => {
+    const lower = query.toLowerCase().trim();
+
+    // Direct ID match
+    const byId = AGENT_TYPES.find(a => a.id === lower);
+    if (byId) return byId;
+
+    // Partial name match
+    const byName = AGENT_TYPES.find(a =>
+      a.name.toLowerCase().includes(lower) ||
+      lower.includes(a.id) ||
+      a.description.toLowerCase().includes(lower)
+    );
+    if (byName) return byName;
+
+    // Keyword match
+    const keywords: Record<string, string> = {
+      'frontend': 'frontend',
+      'front': 'frontend',
+      'ui': 'frontend',
+      'react': 'frontend',
+      'css': 'frontend',
+      'backend': 'backend',
+      'back': 'backend',
+      'api': 'backend',
+      'server': 'backend',
+      'database': 'backend',
+      'db': 'backend',
+      'full': 'fullstack',
+      'fullstack': 'fullstack',
+      'full-stack': 'fullstack',
+      'test': 'tester',
+      'tester': 'tester',
+      'qa': 'tester',
+      'quality': 'tester',
+      'refactor': 'refactor',
+      'clean': 'refactor',
+      'optimize': 'refactor',
+      'doc': 'docs',
+      'docs': 'docs',
+      'documentation': 'docs',
+      'readme': 'docs',
+      'write': 'docs',
+    };
+
+    for (const [keyword, agentId] of Object.entries(keywords)) {
+      if (lower.includes(keyword)) {
+        return AGENT_TYPES.find(a => a.id === agentId) || null;
+      }
+    }
+
+    return null;
+  };
+
+  // Resolve common location names
+  const resolveLocationName = (name: string): string | null => {
+    const lower = name.toLowerCase().trim();
+    const userProfile = process.env.USERPROFILE || process.env.HOME || '';
+
+    const locations: Record<string, string[]> = {
+      [path.join(userProfile, 'OneDrive', 'Desktop', 'Projects')]: ['projects', 'projects folder', 'projects on desktop'],
+      [path.join(userProfile, 'Desktop', 'Projects')]: ['projects', 'desktop projects'],
+      [path.join(userProfile, 'Desktop')]: ['desktop'],
+      [path.join(userProfile, 'Documents')]: ['documents', 'docs'],
+      [path.join(userProfile, 'Downloads')]: ['downloads'],
+      [userProfile]: ['home', '~'],
+    };
+
+    for (const [fullPath, aliases] of Object.entries(locations)) {
+      if (aliases.some(alias => lower.includes(alias)) && fs.existsSync(fullPath)) {
+        return fullPath;
+      }
+    }
+
+    return null;
+  };
+
   const processInput = async (input: string): Promise<boolean> => {
     const trimmed = input.trim();
 
@@ -254,6 +468,72 @@ async function interactiveMode(initialDir: string, model: string) {
 
     // Add to history
     state.history.push(trimmed);
+
+    // Check for natural language commands first
+    const naturalCmd = parseNaturalCommand(trimmed);
+    if (naturalCmd) {
+      switch (naturalCmd.type) {
+        case 'nav':
+          const target = naturalCmd.target || '';
+          // Try to resolve as a known location name first
+          const knownPath = resolveLocationName(target);
+          if (knownPath) {
+            state.currentDir = knownPath;
+            console.log(`\n📁 Changed to: ${state.currentDir}`);
+            const info = getDirectoryInfo(state.currentDir);
+            console.log(`   ${info.files} files, ${info.dirs} folders${info.hasGit ? ', git repo' : ''}${info.hasPackageJson ? ', node project' : ''}\n`);
+          } else {
+            // Try as a regular path
+            const newDir = resolveDir(target, state.currentDir);
+            if (fs.existsSync(newDir) && fs.statSync(newDir).isDirectory()) {
+              state.currentDir = newDir;
+              console.log(`\n📁 Changed to: ${state.currentDir}`);
+              const info = getDirectoryInfo(state.currentDir);
+              console.log(`   ${info.files} files, ${info.dirs} folders${info.hasGit ? ', git repo' : ''}${info.hasPackageJson ? ', node project' : ''}\n`);
+            } else {
+              console.log(`\n❌ Couldn't find: ${target}`);
+              console.log(`   Try: /cd <path> or /projects\n`);
+            }
+          }
+          return true;
+
+        case 'status':
+          showStatus(state);
+          return true;
+
+        case 'list':
+          // Fall through to /ls handling below
+          break;
+
+        case 'help':
+          // Fall through to /help handling below
+          break;
+
+        case 'agent':
+          const agent = findAgent(naturalCmd.target || '');
+          if (agent) {
+            state.agentType = agent;
+            console.log(`\n🤖 Switched to: ${agent.name}`);
+            console.log(`   ${agent.description}\n`);
+          } else {
+            console.log(`\n❓ Couldn't find agent: "${naturalCmd.target}"`);
+            console.log('   Available: fullstack, frontend, backend, tester, refactor, docs\n');
+          }
+          return true;
+
+        case 'quit':
+          console.log('\n👋 Goodbye!\n');
+          return false;
+      }
+
+      // Handle list and help by converting to slash commands
+      if (naturalCmd.type === 'list') {
+        return processInput('/ls');
+      }
+      if (naturalCmd.type === 'help') {
+        return processInput('/help');
+      }
+    }
 
     // Commands
     if (trimmed.startsWith('/')) {
@@ -427,6 +707,47 @@ async function interactiveMode(initialDir: string, model: string) {
       }
 
       return true;
+    }
+
+    // Check if this might be an ambiguous command (short phrases that could be nav or task)
+    const words = trimmed.split(/\s+/);
+    const isAmbiguous = words.length <= 4 && !trimmed.includes('bug') && !trimmed.includes('fix') &&
+      !trimmed.includes('add') && !trimmed.includes('create') && !trimmed.includes('implement') &&
+      !trimmed.includes('write') && !trimmed.includes('build') && !trimmed.includes('test') &&
+      !trimmed.includes('update') && !trimmed.includes('refactor') && !trimmed.includes('delete');
+
+    if (isAmbiguous) {
+      // Try to interpret with Claude for short ambiguous phrases
+      console.log('\n🤔 Interpreting...');
+      const interpretation = await interpretCommand(trimmed, state);
+
+      if (interpretation.action === 'navigate' && interpretation.target) {
+        // Try navigation
+        const knownPath = resolveLocationName(interpretation.target);
+        if (knownPath) {
+          state.currentDir = knownPath;
+          console.log(`📁 Changed to: ${state.currentDir}`);
+          const info = getDirectoryInfo(state.currentDir);
+          console.log(`   ${info.files} files, ${info.dirs} folders\n`);
+          return true;
+        }
+        const newDir = resolveDir(interpretation.target, state.currentDir);
+        if (fs.existsSync(newDir) && fs.statSync(newDir).isDirectory()) {
+          state.currentDir = newDir;
+          console.log(`📁 Changed to: ${state.currentDir}`);
+          const info = getDirectoryInfo(state.currentDir);
+          console.log(`   ${info.files} files, ${info.dirs} folders\n`);
+          return true;
+        }
+      } else if (interpretation.action === 'agent' && interpretation.target) {
+        const agent = findAgent(interpretation.target);
+        if (agent) {
+          state.agentType = agent;
+          console.log(`🤖 Switched to: ${agent.name}\n`);
+          return true;
+        }
+      }
+      // Fall through to task if interpretation didn't match anything
     }
 
     // It's a task - execute it
